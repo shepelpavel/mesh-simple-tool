@@ -45,13 +45,19 @@ static func _entry(arrays: Array, primitive: int, format: int, material: Materia
 	}
 
 
+const KEEP_FORMAT_FLAGS := (Mesh.ARRAY_FLAG_COMPRESS_ATTRIBUTES
+	| Mesh.ARRAY_FLAG_USE_DYNAMIC_UPDATE
+	| Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS
+	| Mesh.ARRAY_FLAG_USES_EMPTY_VERTEX_ARRAY)
+
+
 static func apply(mesh: ArrayMesh, surfaces: Array) -> void:
 	mesh.clear_surfaces()
 	for s in surfaces:
 		var arrays: Array = s["arrays"]
 		if arrays[Mesh.ARRAY_VERTEX] == null:
 			continue
-		var flags: int = int(s["format"]) & Mesh.ARRAY_FLAG_COMPRESS_ATTRIBUTES
+		var flags: int = int(s["format"]) & KEEP_FORMAT_FLAGS
 		mesh.add_surface_from_arrays(s["primitive"], arrays, [], {}, flags)
 		var idx: int = mesh.get_surface_count() - 1
 		var material: Material = s["material"]
@@ -79,12 +85,30 @@ static func has_channel(snap: Array, channel: int) -> bool:
 
 
 static func scaled(snap: Array, channel: int, factor: float) -> Array:
+	var pivot := Vector2.ZERO
+	var found := false
+	var mn := Vector2.ZERO
+	var mx := Vector2.ZERO
+	for s in snap:
+		var uvs: Variant = (s["arrays"] as Array)[channel]
+		if not (uvs is PackedVector2Array) or uvs.is_empty():
+			continue
+		for i in uvs.size():
+			if not found:
+				mn = uvs[i]
+				mx = uvs[i]
+				found = true
+			else:
+				mn = Vector2(minf(mn.x, uvs[i].x), minf(mn.y, uvs[i].y))
+				mx = Vector2(maxf(mx.x, uvs[i].x), maxf(mx.y, uvs[i].y))
+	if not found:
+		return snap
+	pivot = (mn + mx) * 0.5
 	var out: Array = []
 	for s in snap:
 		var arrays: Array = (s["arrays"] as Array).duplicate(true)
 		var uvs: Variant = arrays[channel]
 		if uvs is PackedVector2Array and not uvs.is_empty():
-			var pivot := _uv_center(uvs)
 			var moved := PackedVector2Array()
 			moved.resize(uvs.size())
 			for i in uvs.size():
@@ -92,15 +116,6 @@ static func scaled(snap: Array, channel: int, factor: float) -> Array:
 			arrays[channel] = moved
 		out.append(_entry(arrays, s["primitive"], s["format"], s["material"], s["name"]))
 	return out
-
-
-static func _uv_center(uvs: PackedVector2Array) -> Vector2:
-	var mn := uvs[0]
-	var mx := uvs[0]
-	for i in range(1, uvs.size()):
-		mn = Vector2(minf(mn.x, uvs[i].x), minf(mn.y, uvs[i].y))
-		mx = Vector2(maxf(mx.x, uvs[i].x), maxf(mx.y, uvs[i].y))
-	return (mn + mx) * 0.5
 
 
 static func box_unwrapped(snap: Array, padding: float) -> Array:

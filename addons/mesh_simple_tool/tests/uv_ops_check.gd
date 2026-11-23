@@ -67,7 +67,44 @@ func _initialize() -> void:
 			print("  info lightmap unwrap changed topology, UV2 replaced by the new unwrap")
 		print("lightmap unwrap vertices: %d -> %d" % [uv2_before.size(), lm_uv.size()])
 
+	_test_format_flags()
+	_test_multisurface_pivot()
 	_finish()
+
+
+func _test_format_flags() -> void:
+	var mesh := ArrayMesh.new()
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([Vector3.ZERO, Vector3.RIGHT, Vector3.UP])
+	arrays[Mesh.ARRAY_TEX_UV] = PackedVector2Array([Vector2.ZERO, Vector2.RIGHT, Vector2.UP])
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, Mesh.ARRAY_FLAG_USE_DYNAMIC_UPDATE)
+	var out := ArrayMesh.new()
+	UVOps.apply(out, UVOps.snapshot(mesh))
+	_expect((out.surface_get_format(0) & Mesh.ARRAY_FLAG_USE_DYNAMIC_UPDATE) != 0, "format: dynamic update flag kept")
+
+
+func _test_multisurface_pivot() -> void:
+	var mesh := ArrayMesh.new()
+	for base in [0.0, 10.0]:
+		var arrays: Array = []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([Vector3.ZERO, Vector3.RIGHT, Vector3.UP])
+		arrays[Mesh.ARRAY_TEX_UV] = PackedVector2Array([
+			Vector2(base, 0.0), Vector2(base + 1.0, 0.0), Vector2(base, 1.0)
+		])
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var snap := UVOps.snapshot(mesh)
+	var before_a: Vector2 = (mesh.surface_get_arrays(0)[Mesh.ARRAY_TEX_UV] as PackedVector2Array)[0]
+	var before_b: Vector2 = (mesh.surface_get_arrays(1)[Mesh.ARRAY_TEX_UV] as PackedVector2Array)[0]
+	var out := ArrayMesh.new()
+	UVOps.apply(out, UVOps.scaled(snap, UVOps.UV1, 2.0))
+	var after_a: Vector2 = (out.surface_get_arrays(0)[Mesh.ARRAY_TEX_UV] as PackedVector2Array)[0]
+	var after_b: Vector2 = (out.surface_get_arrays(1)[Mesh.ARRAY_TEX_UV] as PackedVector2Array)[0]
+	_expect(
+		absf((after_b.x - after_a.x) - (before_b.x - before_a.x) * 2.0) < 1e-5,
+		"scale: surfaces share one pivot (%.4f -> %.4f)" % [before_b.x - before_a.x, after_b.x - after_a.x]
+	)
 
 
 func _uv_channel(mesh: ArrayMesh, channel: int) -> PackedVector2Array:

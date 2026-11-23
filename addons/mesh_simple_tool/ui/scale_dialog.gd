@@ -149,3 +149,10 @@ func _restore() -> void:
 	if is_instance_valid(_mesh_instance) and _mesh_instance.mesh is ArrayMesh:
 		UVOps.apply(_mesh_instance.mesh as ArrayMesh, _snapshot)
 	_mesh_instance = null
+
+
+func shutdown() -> void:
+	if not _applied:
+		_restore()
+	_mesh_instance = null
+	_applied = false

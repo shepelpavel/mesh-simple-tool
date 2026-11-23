@@ -93,6 +93,8 @@ func _apply_mode() -> void:
 				UVOps.apply(mesh, result["surfaces"])
 			else:
 				_hint.text = "Auto недоступен: %s. Показываю Box." % result["error"]
+				_mode = Mode.BOX
+				_mode_select.select(_mode_select.get_item_index(Mode.BOX))
 				UVOps.apply(mesh, UVOps.box_unwrapped(_snapshot, 0.02))
 		Mode.CYLINDER:
 			UVOps.apply(mesh, UVOps.cylindrical_unwrapped(_snapshot, 0.02))
@@ -128,3 +130,10 @@ func _restore() -> void:
 	if is_instance_valid(_mesh_instance) and _mesh_instance.mesh is ArrayMesh:
 		UVOps.apply(_mesh_instance.mesh as ArrayMesh, _snapshot)
 	_mesh_instance = null
+
+
+func shutdown() -> void:
+	if not _applied:
+		_restore()
+	_mesh_instance = null
+	_applied = false

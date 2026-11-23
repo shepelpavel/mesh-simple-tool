@@ -15,7 +15,8 @@
 ползунок с шагом 0.01, поле ввода с шагом 0.001. Значение применяется к мешу на каждый сигнал
 `value_changed`; «Отмена» восстанавливает снапшот, снятый при открытии окна.
 
-Масштабирование — изотропное, вокруг центра ограничивающего прямоугольника канала:
+Масштабирование — изотропное, вокруг центра ограничивающего прямоугольника канала, общего для всех
+поверхностей меша:
 
 ```
 uv' = center + (uv - center) * scale
@@ -39,8 +40,9 @@ uv' = center + (uv - center) * scale
   `name`.
 - `scaled(snap, channel, factor)` — глубокая копия массивов, пересчёт нужного канала, если он есть.
 - `apply(mesh, surfaces)` — `clear_surfaces()` и повторный `add_surface_from_arrays()` с возвратом
-  материала и имени поверхности, в конце `emit_changed()`. Если у исходной поверхности стоял флаг
-  `ARRAY_FLAG_COMPRESS_ATTRIBUTES`, он передаётся дальше — сжатие атрибутов не теряется.
+  материала и имени поверхности, в конце `emit_changed()`. Флаги формата поверхности переносятся:
+  `ARRAY_FLAG_COMPRESS_ATTRIBUTES`, `ARRAY_FLAG_USE_DYNAMIC_UPDATE`, `ARRAY_FLAG_USE_8_BONE_WEIGHTS`,
+  `ARRAY_FLAG_USES_EMPTY_VERTEX_ARRAY` — сжатие, режим обновления и скиннинг не теряются.
 - `ensure_array_mesh(mesh_instance)` — принимает `ArrayMesh`, конвертирует `PrimitiveMesh`
   через `get_mesh_arrays()` и присваивает ноде новый ресурс.
 - `check_supported(mesh)` — возвращает причину отказа (сейчас — blend shapes) или пустую строку;

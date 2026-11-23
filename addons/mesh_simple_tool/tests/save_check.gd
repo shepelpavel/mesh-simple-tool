@@ -12,6 +12,11 @@ func _initialize() -> void:
 		return
 	var root := packed.instantiate()
 	var mi := root.find_child("MeshInstance3D", true, false) as MeshInstance3D
+	if mi == null or mi.mesh == null or not (mi.mesh is ArrayMesh):
+		print("FAIL: no ArrayMesh in test scene")
+		root.free()
+		quit(1)
+		return
 	var mesh := mi.mesh as ArrayMesh
 	var snap := UVOps.snapshot(mesh)
 	UVOps.apply(mesh, UVOps.box_unwrapped(snap, 0.02))

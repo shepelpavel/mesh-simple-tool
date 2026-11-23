@@ -112,6 +112,9 @@ func _refresh_info(force: bool = false) -> void:
 	if _stats_pending:
 		return
 	_stats_pending = true
+	if not is_inside_tree():
+		_update_stats.call_deferred()
+		return
 	var elapsed := Time.get_ticks_msec() - _last_stats_ms
 	if elapsed >= STATS_INTERVAL_MS:
 		_update_stats.call_deferred()

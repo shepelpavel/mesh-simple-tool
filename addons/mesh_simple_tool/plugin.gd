@@ -33,14 +33,25 @@ func _exit_tree() -> void:
 	if is_instance_valid(_selection) and _selection.selection_changed.is_connected(_on_selection_changed):
 		_selection.selection_changed.disconnect(_on_selection_changed)
 	if is_instance_valid(_scale_dialog):
+		_scale_dialog.call("shutdown")
 		_scale_dialog.queue_free()
 	if is_instance_valid(_unwrap_dialog):
+		_unwrap_dialog.call("shutdown")
 		_unwrap_dialog.queue_free()
 	if is_instance_valid(_merge_dialog):
 		_merge_dialog.queue_free()
 	if is_instance_valid(_menu_button):
-		_menu_button.queue_free()
+		_drop_menu_button()
 	_menu_button = null
+
+
+func _drop_menu_button() -> void:
+	if not is_instance_valid(_menu_button):
+		return
+	var parent := _menu_button.get_parent()
+	if parent != null:
+		parent.remove_child(_menu_button)
+	_menu_button.queue_free()
 
 
 func _process(delta: float) -> void:
@@ -69,7 +80,7 @@ func _ensure_menu() -> void:
 	if is_instance_valid(_menu_button):
 		if _menu_button.is_inside_tree():
 			return
-		_menu_button.queue_free()
+		_drop_menu_button()
 		_menu_button = null
 	var mesh_menu := _find_mesh_menu(EditorInterface.get_base_control())
 	if mesh_menu == null:
@@ -98,6 +109,8 @@ func _find_mesh_menu(node: Node) -> MenuButton:
 	for child in node.get_children():
 		if child is MenuButton:
 			var mb := child as MenuButton
+			if mb.text == MENU_TEXT:
+				continue
 			if _popup_has_unwrap(mb.get_popup()):
 				return mb
 			if fallback == null and mb.text == "Mesh":

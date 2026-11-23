@@ -241,7 +241,15 @@ func _test_scene_mesh() -> void:
 		return
 	var root := packed.instantiate()
 	var mi := root.find_child("MeshInstance3D", true, false) as MeshInstance3D
+	if mi == null or mi.mesh == null:
+		_fail("scene: no MeshInstance3D with a mesh")
+		root.free()
+		return
 	var mesh := mi.mesh as ArrayMesh
+	if mesh == null:
+		_fail("scene: mesh is not ArrayMesh")
+		root.free()
+		return
 	var snap := UVOps.snapshot(mesh)
 	var before: int = mesh.surface_get_array_len(0)
 	var unique := {}
