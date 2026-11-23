@@ -51,7 +51,8 @@ static func apply(mesh: ArrayMesh, surfaces: Array) -> void:
 		var arrays: Array = s["arrays"]
 		if arrays[Mesh.ARRAY_VERTEX] == null:
 			continue
-		mesh.add_surface_from_arrays(s["primitive"], arrays)
+		var flags: int = int(s["format"]) & Mesh.ARRAY_FLAG_COMPRESS_ATTRIBUTES
+		mesh.add_surface_from_arrays(s["primitive"], arrays, [], {}, flags)
 		var idx: int = mesh.get_surface_count() - 1
 		var material: Material = s["material"]
 		if material != null:
@@ -60,6 +61,12 @@ static func apply(mesh: ArrayMesh, surfaces: Array) -> void:
 		if sname != "":
 			mesh.surface_set_name(idx, sname)
 	mesh.emit_changed()
+
+
+static func check_supported(mesh: ArrayMesh) -> String:
+	if mesh.get_blend_shape_count() > 0:
+		return "меш содержит blend shapes, операция удалила бы их — отменено"
+	return ""
 
 
 static func has_channel(snap: Array, channel: int) -> bool:
@@ -198,11 +205,278 @@ static func lightmap_unwrapped(snap: Array, padding: float) -> Dictionary:
 	return {"ok": true, "error": "", "surfaces": out}
 
 
+static func merged(snap: Array, distance: float, keep_shading: bool = true) -> Dictionary:
+	var tol: float = maxf(distance, 0.000001)
+	var out: Array = []
+	var merged_count := 0
+	var removed_tris := 0
+	for s in snap:
+		var arrays: Array = (s["arrays"] as Array).duplicate(true)
+		var verts: Variant = arrays[Mesh.ARRAY_VERTEX]
+		if not (verts is PackedVector3Array) or verts.is_empty():
+			out.append(_entry(arrays, s["primitive"], s["format"], s["material"], s["name"]))
+			continue
+		var count: int = verts.size()
+		var grouping := _group_positions(verts, tol, arrays[Mesh.ARRAY_NORMAL], keep_shading)
+		var roots: Array = grouping["of"]
+		var root_order: PackedInt32Array = grouping["roots"]
+		var root_slot: Dictionary = grouping["slot"]
+		merged_count += count - root_order.size()
+		var normals: Variant = arrays[Mesh.ARRAY_NORMAL]
+		var averaged := PackedVector3Array()
+		if normals is PackedVector3Array and normals.size() == count:
+			var sums := PackedVector3Array()
+			sums.resize(count)
+			for i in count:
+				sums[i] = Vector3.ZERO
+			for i in count:
+				sums[roots[i]] = sums[roots[i]] + normals[i]
+			averaged.resize(root_order.size())
+			for k in root_order.size():
+				var n: Vector3 = sums[root_order[k]]
+				averaged[k] = n.normalized() if n.length_squared() > 0.0000001 else Vector3.UP
+		var idx: Variant = arrays[Mesh.ARRAY_INDEX]
+		var tri_src := PackedInt32Array()
+		if idx is PackedInt32Array and not idx.is_empty():
+			tri_src = idx
+		else:
+			tri_src.resize(count)
+			for i in count:
+				tri_src[i] = i
+		var new_idx := PackedInt32Array()
+		for t in range(0, tri_src.size() - 2, 3):
+			var a: int = root_slot[roots[tri_src[t]]]
+			var b: int = root_slot[roots[tri_src[t + 1]]]
+			var c: int = root_slot[roots[tri_src[t + 2]]]
+			if a == b or b == c or a == c:
+				removed_tris += 1
+				continue
+			new_idx.append(a)
+			new_idx.append(b)
+			new_idx.append(c)
+		var compact := PackedInt32Array()
+		compact.resize(root_order.size())
+		for i in compact.size():
+			compact[i] = -1
+		var final_roots := PackedInt32Array()
+		for v in new_idx.size():
+			var g: int = new_idx[v]
+			if compact[g] < 0:
+				compact[g] = final_roots.size()
+				final_roots.append(root_order[g])
+			new_idx[v] = compact[g]
+		if new_idx.is_empty():
+			continue
+		for key in [Mesh.ARRAY_VERTEX, Mesh.ARRAY_NORMAL, Mesh.ARRAY_TANGENT, Mesh.ARRAY_COLOR,
+				Mesh.ARRAY_TEX_UV, Mesh.ARRAY_TEX_UV2, Mesh.ARRAY_CUSTOM0, Mesh.ARRAY_CUSTOM1,
+				Mesh.ARRAY_CUSTOM2, Mesh.ARRAY_CUSTOM3, Mesh.ARRAY_BONES, Mesh.ARRAY_WEIGHTS]:
+			var src: Variant = arrays[key]
+			if src == null:
+				continue
+			var gathered: Variant = _gather(src, final_roots, count)
+			if gathered == null:
+				return {
+					"ok": false,
+					"error": "канал %d имеет неподдерживаемый формат, меш не изменён" % key,
+					"surfaces": [],
+					"merged": 0,
+					"removed_tris": 0,
+				}
+			arrays[key] = gathered
+		if normals is PackedVector3Array and normals.size() == count and averaged.size() > 0:
+			var out_normals := PackedVector3Array()
+			out_normals.resize(final_roots.size())
+			for k in final_roots.size():
+				out_normals[k] = averaged[root_slot[final_roots[k]]]
+			arrays[Mesh.ARRAY_NORMAL] = out_normals
+		arrays[Mesh.ARRAY_INDEX] = new_idx
+		out.append(_entry(arrays, s["primitive"], s["format"], s["material"], s["name"]))
+	return {"ok": true, "surfaces": out, "merged": merged_count, "removed_tris": removed_tris}
+
+
+static func merge_stats(snap: Array, distance: float, keep_shading: bool = true) -> Dictionary:
+	var tol: float = maxf(distance, 0.000001)
+	var merged := 0
+	var removed := 0
+	for s in snap:
+		var arrays: Array = s["arrays"]
+		var verts: Variant = arrays[Mesh.ARRAY_VERTEX]
+		if not (verts is PackedVector3Array) or verts.is_empty():
+			continue
+		var grouping := _group_positions(verts, tol, arrays[Mesh.ARRAY_NORMAL], keep_shading)
+		var roots: Array = grouping["of"]
+		var root_order: PackedInt32Array = grouping["roots"]
+		var root_slot: Dictionary = grouping["slot"]
+		merged += verts.size() - root_order.size()
+		removed += _degenerate_count(arrays, roots, root_slot)
+	return {"merged": merged, "removed_tris": removed}
+
+
+static func _degenerate_count(arrays: Array, roots: Array, root_slot: Dictionary) -> int:
+	var idx: Variant = arrays[Mesh.ARRAY_INDEX]
+	var removed := 0
+	if idx is PackedInt32Array and not idx.is_empty():
+		for t in range(0, idx.size() - 2, 3):
+			var a: int = root_slot[roots[idx[t]]]
+			var b: int = root_slot[roots[idx[t + 1]]]
+			var c: int = root_slot[roots[idx[t + 2]]]
+			if a == b or b == c or a == c:
+				removed += 1
+	else:
+		var count: int = roots.size()
+		for t in range(0, count - 2, 3):
+			var a: int = root_slot[roots[t]]
+			var b: int = root_slot[roots[t + 1]]
+			var c: int = root_slot[roots[t + 2]]
+			if a == b or b == c or a == c:
+				removed += 1
+	return removed
+
+
+static func _group_positions(verts: PackedVector3Array, tol: float, normals: Variant = null,
+		keep_shading: bool = true) -> Dictionary:
+	var count := verts.size()
+	var has_normals: bool = keep_shading and normals is PackedVector3Array and normals.size() == count
+	var parent: Array = []
+	parent.resize(count)
+	for i in count:
+		parent[i] = i
+	var inv := 1.0 / tol
+	var tol_sq := tol * tol
+	var cells := {}
+	for i in count:
+		var p: Vector3 = verts[i]
+		var key := Vector3i(floori(p.x * inv), floori(p.y * inv), floori(p.z * inv))
+		if not cells.has(key):
+			cells[key] = []
+		var bucket: Array = cells[key]
+		bucket.append(i)
+	for i in count:
+		var p: Vector3 = verts[i]
+		var base := Vector3i(floori(p.x * inv), floori(p.y * inv), floori(p.z * inv))
+		for dx in range(-1, 2):
+			for dy in range(-1, 2):
+				for dz in range(-1, 2):
+					var key := base + Vector3i(dx, dy, dz)
+					if not cells.has(key):
+						continue
+					for j in cells[key]:
+						if j <= i:
+							continue
+						if p.distance_squared_to(verts[j]) > tol_sq:
+							continue
+						if has_normals and normals[i].dot(normals[j]) < 0.9999:
+							continue
+						_union(parent, i, j)
+	var roots: Array = []
+	roots.resize(count)
+	var root_order := PackedInt32Array()
+	var root_slot := {}
+	for i in count:
+		var r := _find(parent, i)
+		roots[i] = r
+		if not root_slot.has(r):
+			root_slot[r] = root_order.size()
+			root_order.append(r)
+	return {"of": roots, "roots": root_order, "slot": root_slot}
+
+
+static func _gather(src: Variant, roots: PackedInt32Array, count: int) -> Variant:
+	if src is PackedVector3Array:
+		if src.size() != count:
+			return null
+		var a := PackedVector3Array()
+		a.resize(roots.size())
+		for i in roots.size():
+			a[i] = src[roots[i]]
+		return a
+	if src is PackedVector2Array:
+		if src.size() != count:
+			return null
+		var a := PackedVector2Array()
+		a.resize(roots.size())
+		for i in roots.size():
+			a[i] = src[roots[i]]
+		return a
+	if src is PackedColorArray:
+		if src.size() != count:
+			return null
+		var a := PackedColorArray()
+		a.resize(roots.size())
+		for i in roots.size():
+			a[i] = src[roots[i]]
+		return a
+	if src is PackedByteArray:
+		if count <= 0 or src.size() % count != 0:
+			return null
+		var stride: int = src.size() / count
+		if stride <= 0:
+			return null
+		var a := PackedByteArray()
+		a.resize(roots.size() * stride)
+		for i in roots.size():
+			var src_off: int = roots[i] * stride
+			var dst_off: int = i * stride
+			for k in stride:
+				a[dst_off + k] = src[src_off + k]
+		return a
+	if src is PackedFloat32Array:
+		var stride := _stride_for(src.size(), count)
+		if stride == 0:
+			return null
+		var a := PackedFloat32Array()
+		a.resize(roots.size() * stride)
+		for i in roots.size():
+			for k in stride:
+				a[i * stride + k] = src[roots[i] * stride + k]
+		return a
+	if src is PackedInt32Array:
+		var stride := _stride_for(src.size(), count)
+		if stride == 0:
+			return null
+		var a := PackedInt32Array()
+		a.resize(roots.size() * stride)
+		for i in roots.size():
+			for k in stride:
+				a[i * stride + k] = src[roots[i] * stride + k]
+		return a
+	return null
+
+
+static func _stride_for(total: int, count: int) -> int:
+	for stride in [1, 2, 4, 8]:
+		if total == count * stride:
+			return stride
+	return 0
+
+
+static func _find(parent: Array, i: int) -> int:
+	var root: int = i
+	while parent[root] != root:
+		root = parent[root]
+	while parent[i] != root:
+		var next: int = parent[i]
+		parent[i] = root
+		i = next
+	return root
+
+
+static func _union(parent: Array, a: int, b: int) -> void:
+	var ra := _find(parent, a)
+	var rb := _find(parent, b)
+	if ra == rb:
+		return
+	if ra < rb:
+		parent[rb] = ra
+	else:
+		parent[ra] = rb
+
+
 static func _same_vertices(a: PackedVector3Array, b: PackedVector3Array) -> bool:
 	if a.size() != b.size():
 		return false
 	for i in a.size():
-		if not a[i].is_equal_approx(b[i]):
+		if a[i].distance_squared_to(b[i]) > 0.00000001:
 			return false
 	return true
 

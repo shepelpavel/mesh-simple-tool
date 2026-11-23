@@ -4,18 +4,23 @@ extends EditorPlugin
 const UVOps := preload("uv_ops.gd")
 const ScaleDialog := preload("ui/scale_dialog.gd")
 const UnwrapDialog := preload("ui/unwrap_dialog.gd")
+const MergeDialog := preload("ui/merge_dialog.gd")
 
 const MENU_TEXT := "MST"
 const ID_SCALE_UV2 := 1
 const ID_UNWRAP_UV := 2
 const ID_SCALE_UV := 3
+const ID_MERGE_BY_DISTANCE := 4
 const WATCHDOG_INTERVAL := 0.4
+const MENU_SEARCH_TICKS := 5
 
 var _menu_button: MenuButton
 var _scale_dialog: ConfirmationDialog
 var _unwrap_dialog: ConfirmationDialog
+var _merge_dialog: ConfirmationDialog
 var _selection: EditorSelection
 var _watchdog := 0.0
+var _miss_count := 0
 
 
 func _enter_tree() -> void:
@@ -31,6 +36,8 @@ func _exit_tree() -> void:
 		_scale_dialog.queue_free()
 	if is_instance_valid(_unwrap_dialog):
 		_unwrap_dialog.queue_free()
+	if is_instance_valid(_merge_dialog):
+		_merge_dialog.queue_free()
 	if is_instance_valid(_menu_button):
 		_menu_button.queue_free()
 	_menu_button = null
@@ -41,6 +48,14 @@ func _process(delta: float) -> void:
 	if _watchdog < WATCHDOG_INTERVAL:
 		return
 	_watchdog = 0.0
+	if is_instance_valid(_menu_button) and _menu_button.is_inside_tree():
+		_miss_count = 0
+		_update_visibility()
+		return
+	_miss_count += 1
+	if _miss_count < MENU_SEARCH_TICKS:
+		return
+	_miss_count = 0
 	_ensure_menu()
 	_update_visibility()
 
@@ -51,8 +66,11 @@ func _on_selection_changed() -> void:
 
 
 func _ensure_menu() -> void:
-	if is_instance_valid(_menu_button) and _menu_button.is_inside_tree():
-		return
+	if is_instance_valid(_menu_button):
+		if _menu_button.is_inside_tree():
+			return
+		_menu_button.queue_free()
+		_menu_button = null
 	var mesh_menu := _find_mesh_menu(EditorInterface.get_base_control())
 	if mesh_menu == null:
 		return
@@ -68,6 +86,7 @@ func _ensure_menu() -> void:
 	popup.add_item("Scale UV2", ID_SCALE_UV2)
 	popup.add_item("Unwrap UV", ID_UNWRAP_UV)
 	popup.add_item("Scale UV", ID_SCALE_UV)
+	popup.add_item("Merge by distance", ID_MERGE_BY_DISTANCE)
 	popup.id_pressed.connect(_on_menu_id_pressed)
 	parent.add_child(_menu_button)
 	parent.move_child(_menu_button, mesh_menu.get_index() + 1)
@@ -79,11 +98,10 @@ func _find_mesh_menu(node: Node) -> MenuButton:
 	for child in node.get_children():
 		if child is MenuButton:
 			var mb := child as MenuButton
-			if mb.text == "Mesh":
-				if _popup_has_unwrap(mb.get_popup()):
-					return mb
-				if fallback == null:
-					fallback = mb
+			if _popup_has_unwrap(mb.get_popup()):
+				return mb
+			if fallback == null and mb.text == "Mesh":
+				fallback = mb
 		var nested := _find_mesh_menu(child)
 		if nested != null:
 			return nested
@@ -92,7 +110,8 @@ func _find_mesh_menu(node: Node) -> MenuButton:
 
 func _popup_has_unwrap(popup: PopupMenu) -> bool:
 	for i in popup.get_item_count():
-		if popup.get_item_text(i) == "Unwrap UV2 for Lightmap/AO":
+		var item_text := popup.get_item_text(i)
+		if item_text == "Unwrap UV2 for Lightmap/AO" or item_text.contains("UV2"):
 			return true
 	return false
 
@@ -123,6 +142,8 @@ func _on_menu_id_pressed(id: int) -> void:
 			_open_scale(mi, UVOps.UV1)
 		ID_UNWRAP_UV:
 			_open_unwrap(mi)
+		ID_MERGE_BY_DISTANCE:
+			_open_merge(mi)
 
 
 func _open_scale(mi: MeshInstance3D, channel: int) -> void:
@@ -137,3 +158,10 @@ func _open_unwrap(mi: MeshInstance3D) -> void:
 		_unwrap_dialog = UnwrapDialog.new()
 		EditorInterface.get_base_control().add_child(_unwrap_dialog)
 	_unwrap_dialog.call("open", mi)
+
+
+func _open_merge(mi: MeshInstance3D) -> void:
+	if not is_instance_valid(_merge_dialog):
+		_merge_dialog = MergeDialog.new()
+		EditorInterface.get_base_control().add_child(_merge_dialog)
+	_merge_dialog.call("open", mi)

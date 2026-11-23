@@ -1,9 +1,12 @@
 @tool
 extends Control
 
+const MAX_DRAW_TRIS := 20000
+
 var _points: PackedVector2Array = PackedVector2Array()
 var _has_uv := false
 var _outside := 0
+var _total_tris := 0
 
 
 func _init() -> void:
@@ -17,6 +20,7 @@ func set_mesh(mesh: Mesh) -> void:
 	_points.clear()
 	_has_uv = false
 	_outside = 0
+	_total_tris = 0
 	if mesh is ArrayMesh:
 		var am := mesh as ArrayMesh
 		for si in am.get_surface_count():
@@ -28,24 +32,34 @@ func set_mesh(mesh: Mesh) -> void:
 			if uvs.is_empty() or verts.is_empty():
 				continue
 			_has_uv = true
+			for uv in uvs:
+				if uv.x < 0.0 or uv.x > 1.0 or uv.y < 0.0 or uv.y > 1.0:
+					_outside += 1
 			var idx: Variant = arrays[Mesh.ARRAY_INDEX]
+			var budget: int = MAX_DRAW_TRIS * 3 - _points.size()
+			if budget <= 0:
+				_total_tris += (idx.size() if idx is PackedInt32Array else mini(uvs.size(), verts.size())) / 3
+				continue
 			if idx is PackedInt32Array and not idx.is_empty():
-				for i in idx.size():
+				_total_tris += idx.size() / 3
+				var take: int = mini(idx.size(), budget)
+				take -= take % 3
+				for i in take:
 					var k: int = idx[i]
 					if k < 0 or k >= uvs.size():
 						continue
 					_points.append(uvs[k])
 			else:
 				var limit: int = mini(uvs.size(), verts.size())
+				_total_tris += limit / 3
+				var take: int = mini(limit, budget)
+				take -= take % 3
 				var i := 0
-				while i + 2 < limit:
+				while i + 2 < take:
 					_points.append(uvs[i])
 					_points.append(uvs[i + 1])
 					_points.append(uvs[i + 2])
 					i += 3
-	for p in _points:
-		if p.x < 0.0 or p.x > 1.0 or p.y < 0.0 or p.y > 1.0:
-			_outside += 1
 	queue_redraw()
 
 
@@ -82,7 +96,10 @@ func _draw() -> void:
 		draw_line(b, c, line_color, 1.0, true)
 		draw_line(c, a, line_color, 1.0, true)
 		i += 3
-	var info := "%d tris" % (_points.size() / 3)
+	var drawn: int = _points.size() / 3
+	var info := "%d tris" % drawn
+	if _total_tris > drawn:
+		info = "%d of %d tris (limited)" % [drawn, _total_tris]
 	if _outside > 0:
 		info += "   %d verts outside 0..1" % _outside
 	draw_string(

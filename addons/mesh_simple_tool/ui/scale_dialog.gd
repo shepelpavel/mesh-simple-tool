@@ -1,13 +1,12 @@
 @tool
 extends ConfirmationDialog
 
-signal finished_apply
-
 const UVOps := preload("../uv_ops.gd")
 
 var _mesh_instance: MeshInstance3D
 var _channel := 0
 var _snapshot: Array = []
+var _has_channel := false
 var _applied := false
 var _slider: HSlider
 var _spin: SpinBox
@@ -62,6 +61,10 @@ func open(mesh_instance: MeshInstance3D, channel: int) -> void:
 	if mesh == null:
 		push_warning("MST: mesh type is not supported (need ArrayMesh or PrimitiveMesh)")
 		return
+	var reason := UVOps.check_supported(mesh)
+	if reason != "":
+		push_warning("MST: " + reason)
+		return
 	_mesh_instance = mesh_instance
 	_channel = channel
 	_snapshot = UVOps.snapshot(mesh)
@@ -70,7 +73,8 @@ func open(mesh_instance: MeshInstance3D, channel: int) -> void:
 	_slider.set_value_no_signal(1.0)
 	_spin.set_value_no_signal(1.0)
 	_hint.text = ""
-	if not UVOps.has_channel(_snapshot, channel):
+	_has_channel = UVOps.has_channel(_snapshot, channel)
+	if not _has_channel:
 		_hint.text = "У меша нет канала %s — масштабировать нечего." % ("UV2" if channel == UVOps.UV2 else "UV")
 	_check_hint()
 	popup_centered(Vector2i(420, 130))
@@ -87,7 +91,10 @@ func _check_hint() -> void:
 			if n != _mesh_instance and (n as MeshInstance3D).mesh == _mesh_instance.mesh:
 				shared += 1
 	if shared > 0:
-		_hint.text = "Меш общий ещё с %d нод(ой) — изменения затронут их тоже." % shared
+		var prefix := _hint.text
+		if prefix != "":
+			prefix += " "
+		_hint.text = prefix + "Меш общий ещё с %d нод(ой) — изменения затронут их тоже." % shared
 
 
 func _on_slider_changed(value: float) -> void:
@@ -103,6 +110,8 @@ func _on_spin_changed(value: float) -> void:
 
 
 func _apply(factor: float) -> void:
+	if not _has_channel:
+		return
 	if not is_instance_valid(_mesh_instance) or _mesh_instance.mesh == null:
 		return
 	var mesh := _mesh_instance.mesh as ArrayMesh
@@ -114,7 +123,6 @@ func _apply(factor: float) -> void:
 func _on_confirmed() -> void:
 	_applied = true
 	_mark_scene_unsaved()
-	finished_apply.emit()
 
 
 func _mark_scene_unsaved() -> void:
@@ -132,7 +140,7 @@ func _on_visibility_changed() -> void:
 
 
 func _settle() -> void:
-	if _applied:
+	if visible or _applied:
 		return
 	_restore()
 

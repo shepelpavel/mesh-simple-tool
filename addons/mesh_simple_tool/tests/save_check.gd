@@ -19,11 +19,13 @@ func _initialize() -> void:
 	var packed_scene := PackedScene.new()
 	if packed_scene.pack(root) != OK:
 		print("FAIL: pack")
+		root.free()
 		quit(1)
 		return
 	var err := ResourceSaver.save(packed_scene, TMP_PATH)
 	if err != OK:
 		print("FAIL: save %s" % error_string(err))
+		root.free()
 		quit(1)
 		return
 	var reloaded := (load(TMP_PATH) as PackedScene).instantiate()
@@ -32,9 +34,13 @@ func _initialize() -> void:
 	if before.distance_to(after) < 1e-5:
 		print("SAVE OK: uv %s -> %s" % [before, after])
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_PATH))
+		root.free()
+		reloaded.free()
 		quit(0)
 	else:
 		print("SAVE FAIL: uv %s -> %s" % [before, after])
+		root.free()
+		reloaded.free()
 		quit(1)
 
 

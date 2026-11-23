@@ -1,8 +1,6 @@
 @tool
 extends ConfirmationDialog
 
-signal finished_apply
-
 const UVOps := preload("../uv_ops.gd")
 const UVPreview := preload("uv_preview.gd")
 
@@ -60,6 +58,10 @@ func open(mesh_instance: MeshInstance3D) -> void:
 	if mesh == null:
 		push_warning("MST: mesh type is not supported (need ArrayMesh or PrimitiveMesh)")
 		return
+	var reason := UVOps.check_supported(mesh)
+	if reason != "":
+		push_warning("MST: " + reason)
+		return
 	_mesh_instance = mesh_instance
 	_snapshot = UVOps.snapshot(mesh)
 	_applied = false
@@ -100,7 +102,6 @@ func _apply_mode() -> void:
 func _on_confirmed() -> void:
 	_applied = true
 	_mark_scene_unsaved()
-	finished_apply.emit()
 
 
 func _mark_scene_unsaved() -> void:
@@ -118,7 +119,7 @@ func _on_visibility_changed() -> void:
 
 
 func _settle() -> void:
-	if _applied:
+	if visible or _applied:
 		return
 	_restore()
 
